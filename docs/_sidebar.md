@@ -4,4 +4,5 @@
         * [Chapter2 模型评估与选择](27_eatingmelon/chapter2.md)
         * [Chapter3 线性模型](27_eatingmelon/chapter3.md)
         * [Chapter4 决策树](27_eatingmelon/chapter4.md)
+        * [Chapter5 神经网络](27_eatingmelon/chapter5.md)
 
