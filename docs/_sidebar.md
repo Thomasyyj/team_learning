@@ -5,4 +5,5 @@
         * [Chapter3 线性模型](27_eatingmelon/chapter3.md)
         * [Chapter4 决策树](27_eatingmelon/chapter4.md)
         * [Chapter5 神经网络](27_eatingmelon/chapter5.md)
+        * [Chapter6 支持向量机](27_eatingmelon/chapter6.md)
 
