@@ -459,9 +459,195 @@ Primitives有以下三种类型：**曲线-Line2D, 矩形-Rectangle, 图像-imag
 
 ## 三. 对象容器
 
+对象的容器不仅会包含基本的primitives，并且容器本身还有一些自己的属性。现在我们来学习容器整体的属性以及运用
 
+1. **Figure容器**
 
+   `matplotlib.figure.Figure`是`Artist`最顶层的`container`-对象容器，它包含了图表中的所有元素。任何一张图表都是在Figure.patch作为背景的一个矩形中生成的。
 
+   Axes可以看作是figure容器当中的一个子容器，当我们向图表中添加Figure.add_subplot() 或者 Figure.add_axes()元素时，这些都会被添加到Figure.axes列表中。
 
+   我们来看看如何直观地体现这一点。
 
+   ```python
+   fig = plt.figure()
+   ax1 = fig.add_subplot(211) #create a 2*1 area and select the first place
+   ax2 = fig.add_axes([0.125, 0.1, 0.7, 0.3])#[a,b,c,d] present the left, bottom, width, height respectively
+   plt.show()
+   ```
 
+   ![](material/ch2_figplot.png)
+
+   首先我们在subplot(211)的位置创建了ax1，接着用axes方法在坐标[0.125, 0.1]处创建	了一个新图。
+
+   我们可以把axes看作是一个列表。但是由于Figure会维持current axes，因此我们不能直接通过Figure.axes列表来添加火删除元素，而是应该用Figure.add_subplot, Figure.add_axes() 来手动添加元素，然后通过Figure.delaxes()来删除元素。但是，我们可以迭代或者访问Figure.axes中的Axes然后对这个属性进行修改。
+
+   比如我们把之前的图给它添加网格线
+
+   ```python
+   fig = plt.figure()
+   ax1 = fig.add_subplot(211)
+   ax2 = fig.add_axes([0.1, 0.1, 0.7, 0.3])
+   for ax in fig.axes:
+       ax.grid(True)
+   plt.show()
+   ```
+
+   ![](material/ch2_figgrid.png)
+
+   `Figure`也有它自己的`text、line、patch、image。可以直接通过`add_...语句直接添加。但是注意`Figure`默认的坐标系是以像素为单位，你可能需要转换成figure坐标系：(0,0)表示左下点，(1,1)表示右上点。
+
+   **Figure容器的常见属性：**
+   `Figure.patch`属性：Figure的背景矩形
+   `Figure.axes`属性：一个Axes实例的列表（包括Subplot)
+   `Figure.images`属性：一个FigureImages patch列表
+   `Figure.lines`属性：一个Line2D实例的列表（很少使用）
+   `Figure.legends`属性：一个Figure Legend实例列表（不同于Axes.legends)
+   `Figure.texts`属性：一个Figure Text实例列表
+
+2. Axes容器
+
+   Matplotlib.axes.Axes是matplotlib的核心。它大量地用于存放绘图Artist，并且有许多辅助方法来创建，添加和修改Artist。
+
+   和Figure容器类似，axes容器本身包含一个patch属性。这个属性在创建axes的当初就已经创建。对于笛卡尔坐标系而言，它是一个`Rectangle`；对于极坐标而言，它是一个`Circle`。这个patch属性决定了绘图区域的形状、背景和边框。
+
+   我们来简单的看一下这个patch长什么样子，并给它穿件衣服（换个颜色）
+
+   ```python
+   fig = plt.figure()
+   ax = fig.add_subplot(111)
+   ax_patch = ax.patch
+   ax_patch.set_facecolor('green')
+   plt.show()
+   ```
+
+   ![](material/ch2_axpatch.png)
+
+   Axes容器中包含了很多用于绘图和添加primitives的方法：
+
+   如`.plot()、.text()、.hist()、.imshow()`等方法
+
+   Subplot实际就是一个特殊的Axes，但是它的位置是库自动生成好的。其实你也可以在任意区域创建Axes，通过figure.add_axes([left, bottem, width, height])。
+
+   值得注意的是，我们不能够直接通过Axes.line或者Axes.patches来添加图标，因为让创建或者添加一个对象到图表中时，Axes会做许多自动化的工作。比较好的方法是使用.add_line(), .add_patch()方法来添加。
+
+   另外Axes还包含两个最重要的Artist container：
+
+   `ax.xaxis`：XAxis对象的实例，用于处理x轴tick以及label的绘制
+   `ax.yaxis`：YAxis对象的实例，用于处理y轴tick以及label的绘制
+   会在下面章节详细说明。
+
+   
+
+3. Axis容器
+
+   `matplotlib.axis.Axis`实例用于处理`tick line`、`grid line`、`tick label`以及`axis label`的绘制，它包括坐标轴上的刻度线与刻度，坐标轴的网络以及标题。通常我们可以通过这个类来控制y轴左边右边的刻度，以及x轴上边下边的刻度。
+
+   Axis存储了用于自适应，平移或者缩放用到的data_interval和view_interval。它还有Locator实例和Formatter实例用于控制刻度线的位置以及刻度。
+
+   每个Axis都有一个label属性，也有主刻度列表和次刻度列表。
+
+   刻度是动态创建的，只有在需要使用的时候才会创建。Axis也提供了一些辅助方法来获取刻度文本刻度线位置等等，如下演示。
+
+   ```python
+   fig, ax = plt.subplots()
+   x = range(0,5)
+   y = [2,5,7,8,10]
+   plt.plot(x, y, '-')
+   
+   axis = ax.xaxis # axis为X轴对象
+   axis.get_ticklocs()     # 获取刻度线的位置
+   axis.get_ticklabels()   # 获取刻度label列表(一个Text实例的列表）。 可以通过minor=True|False关键字参数控制输出minor还是major的tick label。
+   axis.get_ticklines()    # 获取刻度线列表(一个Line2D实例的列表）。 可以通过minor=True|False关键字参数控制输出minor还是major的tick line。
+   axis.get_data_interval()# 获取轴刻度间隔
+   axis.get_view_interval()# 获取轴视角（位置）的间隔
+   ```
+
+   接下来我们来演示如何对刻度作出调整和样式修改。
+
+   比如说我们先来看这张图，如何做出这张图的样式呢？
+
+   ![](material/ch2_axis.png)
+
+   ```python
+   fig = plt.figure()
+   patch = fig.patch
+   patch.set_facecolor('lightgoldenrodyellow')
+   
+   ax1 = fig.add_axes([0.1, 0.3, 0.4, 0.4])
+   rect = ax1.patch
+   rect.set_facecolor('lightslategray')
+   for label in ax1.xaxis.get_ticklabels():
+     # change the style of the labels in x-axis
+     label.set_color('red')
+     label.set_rotation(45)
+     label.set_fontsize(16)
+     
+   for line in ax1.yaxis.get_ticklines():
+     # change the style of the lines in y-axis
+     line.set_color('green')
+     line.set_markersize(25)
+     line.set_markeredgewidth(2)
+    
+   plt.show()
+   ```
+
+4. Tick容器
+
+   Matplotlib.axis.Tick是所有容器中最末端的容器对象。
+
+   Tick类包含了tick, line, grid实例以及对应的label
+
+   所有的这些都可以通过`Tick`的属性获取，常见的`tick`属性有
+   `Tick.tick1line`：Line2D实例
+   `Tick.tick2line`：Line2D实例
+   `Tick.gridline`：Line2D实例
+   `Tick.label1`：Text实例
+   `Tick.label2`：Text实例
+
+   这里我们可以看到有tick中有1，2。这个分别代表x轴的上/下，y轴的左/右。
+
+   我们来做一幅下图
+
+   ![](material/ch2_tick.png)
+
+   ```python
+   fig, ax = plt.subplots()
+   ax.plot(100*np.random.rand(20))
+   
+   # set the tick font
+   formatter = matplotlib.ticker.FormatStrFormatter('$%1.2f')
+   ax.yaxis.set_major_formatter(formatter)
+   
+   #set the right to be the main axis
+   ax.yaxis.set_tick_params(which='major', labelcolor='green', labelleft=False, labelright=True)
+   plt.show()
+   
+   ```
+
+   至此，所有的容器和他们的方法，作用都已经介绍完毕，接下来我们来做一个简单的总结
+
+## 四. 总结
+
+我们这一章学习了matplotlib的基本构图，同时也掌握了基本图例的修改技巧。如果要快速掌握matplotlib的作图逻辑，我们还是建议记下这一张介绍的大纲：
+
+- 基本元素primitives
+  - Line2D
+    - Lines
+    - Error bar
+  - patches
+    - hist/bar
+    - Polygon
+    - Wedges
+    - Collections
+  - Images
+
+- 基本容器container（从最前类到最末类）
+  - figure
+  - Axes
+  - axis
+  - Ticks
+
+之后我们设计图片的时候，也可以按照这个顺序考虑，先创建图层figrure和subplot，再添加出基本元素，最后按照层级对每个基本元素做调整。
+
+要注意，调整的方法有多种：直接在plot上调整图形，获得对象后在对象上进行调整，获得属性在属性上用setp()函数进行调整。具体的调整超参数则可以直接翻阅文档来调整。
