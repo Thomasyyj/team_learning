@@ -10,4 +10,5 @@
     - 第29期数据可视化教学
       * [Chapter1 Introduction to matplotlib](29_Matplotlib/ch1.md)
       * [Chapter2 Basic plots](29_Matplotlib/ch2.md)
+      * [Chapter3 Layout and style](29_Matplotlib/ch3.md)
 
