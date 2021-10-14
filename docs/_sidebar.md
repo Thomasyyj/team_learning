@@ -1,5 +1,5 @@
 * [目录](README.md)
-    * 第27期：吃瓜教学（机器学习公式推导）
+    * 第29期：南瓜书公式推导
         * [Chapter1 绪论](27_eatingmelon/chapter1.md)
         * [Chapter2 模型评估与选择](27_eatingmelon/chapter2.md)
         * [Chapter3 线性模型](27_eatingmelon/chapter3.md)
