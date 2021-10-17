@@ -14,6 +14,7 @@
 
     - 第30期：决策树及集成学习
       - [Chapter1 Decision Trees](30_Decisiontree/Chapter1.md)
-
+      - [Task 1: CART Tree Algorithm in python](30_Decisiontree/Task2.md)
+    
     
 
