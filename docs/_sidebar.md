@@ -18,5 +18,5 @@
       - [Chapter2 Ensemble modes](30_Decisiontree/Chapter2.md)
     
     - 第32期：推荐系统的流程搭建
-      - [Chapter1 推荐系统的基本流程](32_Recomendation/Chapter1.md)
+      - [Chapter1 推荐系统的基本流程](32_Recomentdation/Chapter1.md)
 
