@@ -1,5 +1,5 @@
 * [目录](README.md)
-    
+  
     * 第29期：南瓜书公式推导
         * [Chapter1 绪论](27_eatingmelon/chapter1.md)
         * [Chapter2 模型评估与选择](27_eatingmelon/chapter2.md)
@@ -19,4 +19,5 @@
     
     - 第32期：推荐系统的流程搭建
       - [Chapter1 推荐系统的基本流程](32_Recomentdation/Chapter1.md)
+      - [Chapter2 数据库的基本使用](32_Recomentdation/Chapter2md)
 
