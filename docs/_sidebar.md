@@ -19,5 +19,5 @@
     
     - 第32期：推荐系统的流程搭建
       - [Chapter1 推荐系统的基本流程](32_Recomentdation/Chapter1.md)
-      - [Chapter2 数据库的基本使用](32_Recomentdation/Chapter2md)
+      - [Chapter2 数据库的基本使用](32_Recomentdation/Chapter2.md)
 
