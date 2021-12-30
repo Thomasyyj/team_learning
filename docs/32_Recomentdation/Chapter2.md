@@ -206,16 +206,42 @@ ALTER TABLE Students DROP stu_num;
 
 5. 字段的修改
 
-   ```mysql
-   -- 修改字段age的数据类型
-   ALTER TABLE Students MODIFY age CHAR(3);
-   ```
+   1. d通过`MODIFY`修改字段的数据类型。
 
-6. 
+      ```mysql
+      -- 修改字段age的数据类型
+      ALTER TABLE Students MODIFY age CHAR(3);
+      ```
 
-通过`MODIFY`修改字段的数据类型。
+   2. 通过change命令，修改字段名或类型
+
+      ```mysql
+      -- 修改字段name为stu_name，不修改数据类型
+      ALTER TABLE Students CHANGE name stu_name CHAR(15);
+      
+      -- 修改字段sex为stu_sex，数据类型修改为int
+      ALTER TABLE Students CHANGE sex stu_sex INT;
+      ```
 
 #### 1.5.4 表的查询
+
+sql语句主要通过select语句来查询，语法结构为
+
+```mysql
+SELECT <字段名>, ……
+ FROM <表名>;
+```
+
+如果要直接查询全部字段
+
+```mysql
+SELECT *
+ FROM <表名>;
+```
+
+其中，**星号（*）**代表全部字段的意思。
+
+
 
 #### 1.5.5 表的复制
 
