@@ -129,6 +129,145 @@
 
 1. 流程
 
-   
+   - 针对注册用户，建立冷启动的推荐页列表数据，通过用户年龄、性别指定用户群，自定义用户的新闻类别，根据新闻热度值，生成冷启动的推荐列表
+
+   - 针对老用户，提供个性化推荐，目前该系统没有提供千人千面的推荐功能，需要使用机器学习流程来完成这一部分功能
 
 2. 代码逻辑
+
+   - `generate_cold_user_strategy_templete_to_redis_v2()`方法：按照用户类别、新闻类别提供各类新闻的热度值；通过自定义配置将用户分为4类，遍历各类别中的新闻类型，将物料库（`MongoDB`的`NewsRecSys`库的`FeatureProtail`集合数据）中对应的新闻热度值按照下面形式存入Redis[0]的`cold_start_group`中:
+
+     ```python
+     def generate_cold_user_strategy_templete_to_redis_v2(self):
+             """冷启动用户模板，总共分成了四类人群
+             每类人群都把每个类别的新闻单独存储
+             """
+             for k, item in self.user_group.items():
+                 for cate in item:
+                     cate_cnt = 0
+                     cate_id = self.name2id_cate_dict[cate]
+                     # k 表示人群分组
+                     redis_key = "cold_start_group:{}:{}".format(str(k), cate_id)
+                     for news_info in self.feature_protrail_collection.find({"cate": cate}):
+                         cate_cnt += 1
+                         self.reclist_redis.zadd(redis_key, {news_info['cate'] + '_' + news_info['news_id']: news_info['hot_value']}, nx=True)
+                     print("类别 {} 的 新闻数量为 {}".format(cate, cate_cnt))
+     
+     ```
+
+   - `user_news_info_to_redis()`方法：
+
+     1. 按照用户、新闻分类提供用户冷启动的推荐模板；遍历所有用户，针对每个用户分类，从Redis[0]的`cold_start_group`中取出新闻热度值，按照以下形式存入Redis[0]的`cold_start_user`中：
+
+        ```
+        cold_start_user:<用户ID>:<新闻类别标识>: {<新闻类别名>_<新闻id>:<热度值>}
+        
+        ```
+
+     2. 按照用户提供用户的新闻类别标识；针对每个用户，根据自定义的用户新闻类别（即每个用户分类具有哪些新闻类别），按照以下形式存入Redis[0]的`cold_start_user_cate_set`中：
+
+        ```
+        cold_start_user_cate_set:<用户ID>: {<新闻类别标识>}
+        
+        ```
+
+   - 冷启动代码
+
+   ```python
+   def generate_cold_start_news_list_to_redis_for_register_user(self):
+           """给已经注册的用户制作冷启动新闻列表
+           """
+           for user_info in self.register_user_sess.query(RegisterUser).all():
+               if int(user_info.age) < 23 and user_info.gender == "female":
+                   redis_key = "cold_start_group:{}".format(str(1))
+                   self.copy_redis_sorted_set(user_info.userid, redis_key)
+               elif int(user_info.age) >= 23 and user_info.gender == "female":
+                   redis_key = "cold_start_group:{}".format(str(2))
+                   self.copy_redis_sorted_set(user_info.userid, redis_key)
+               elif int(user_info.age) < 23 and user_info.gender == "male":
+                   redis_key = "cold_start_group:{}".format(str(3))
+                   self.copy_redis_sorted_set(user_info.userid, redis_key)
+               elif int(user_info.age) >= 23 and user_info.gender == "male":
+                   redis_key = "cold_start_group:{}".format(str(4))
+                   self.copy_redis_sorted_set(user_info.userid, redis_key)
+               else:
+                   pass 
+           print("generate_cold_start_news_list_to_redis_for_register_user."
+   ```
+
+## 2.Online
+
+### 2.1 热门页列表构建
+
+1. 流程
+
+   - 获取用户曝光列表，得到所有的新闻ID
+   - 针对新用户，从之前的离线热门页列表中，为该用户生成一份热门页列表，针对老用户，直接获取该用户的热门页列表
+   - 对上述热门列表，每次选取10条新闻，进行页面展示
+   - 对已选取的10条新闻，更新曝光记录
+
+2. 代码
+
+   代码位于`recprocess/online.py`
+
+   - `_get_user_expose_set()`方法：主要获取用户曝光列表，得到所有的新闻ID；该数据存储在Redis[3]中，数据格式如下：
+
+     ```
+     user_exposure:<用户ID>: {<新闻ID>:<曝光时间>} Copy to clipboardErrorCopied
+     ```
+
+   - `_judge_and_get_user_reverse_index()`方法：用于判断用户是否存在热门页列表，如果用户是新用户，根据Redis[0]的`hot_list_news_cate`中的数据，复制创建该用户的热门页列表，具体数据格式如下：
+
+     ```
+     user_id_hot_list:<用户ID>:<新闻分类标识>: {<新闻类别名>_<新闻id>:<热度值>}Copy to clipboardErrorCopied
+     ```
+
+   - `_get_polling_rec_list()`方法：通过轮询方式获取用户的展示列表，每次只取出10条新闻；通过while循环方式，从Redis[0]的`user_id_hot_list:<用户ID>:<新闻分类标识>`中选取新闻，之后删除已选取的新闻，并把选取的10条新闻内容放到用户新闻（`user_news_list`）数组中，新闻ID放到曝光列表（`exposure_news_list`）中
+
+   - `_save_user_exposure()`方法：将曝光新闻数据存储到Redis[3]中；设置曝光时间，删除重复的曝光新闻，并按照下列格式存储到Redis[3]的`user_exposure`中：
+
+     ```
+     user_exposure:<用户ID>: {<新闻ID>:<曝光时间>} Copy to clipboard
+     ```
+
+### 2.2 推荐页列表构建
+
+1. 流程
+
+   - 获取用户曝光列表，得到所有的新闻ID
+   - 针对新用户，从之前的离线推荐页列表中，为该用户生成一份推荐页列表，针对老用户，直接获取该用户的推荐页列表
+   - 对上述热门列表，每次选取10条新闻，进行页面展示
+   - 对已选取的10条新闻，更新曝光记录
+
+2. 代码
+
+   代码位于`recprocess/online.py`
+
+   - `_get_user_expose_set()`方法：主要获取用户曝光列表，得到所有的新闻ID；该数据存储在Redis[3]中，数据格式如下：
+
+     ```
+     user_exposure:<用户ID>: {<新闻ID>:<曝光时间>} Copy to clipboardErrorCopied
+     ```
+
+   - `_judge_and_get_user_reverse_index()`方法：用于判断用户是否存在冷启动列表，如果用户是新用户，获取分组ID，根据用户DI和分组ID，从Redis[0]的`cold_start_group`中的数据，复制创建该用户的推荐列表，具体数据格式如下：
+
+     ```
+     cold_start_user:<用户ID>:<新闻分类标识>: {<新闻类别名>_<新闻id>:<热度值>}Copy to clipboardErrorCopied
+     ```
+
+     将用户当前的新闻类别标识，存放到`cold_start_user_cate_set`中，具体格式如下：
+
+     ```
+     cold_start_user_cate_set:<用户ID>: {<新闻ID>}Copy to clipboardErrorCopied
+     ```
+
+   - `_get_polling_rec_list()`方法：通过轮询方式获取用户的展示列表，每次只取出10条新闻；通过while循环方式，从Redis[0]的`cold_start_user:<用户ID>:<新闻分类标识>`中选取新闻，之后删除已选取的新闻，并把选取的10条新闻内容放到用户新闻（`user_news_list`）数组中，新闻ID放到曝光列表（`exposure_news_list`）中
+
+   - `_save_user_exposure()`方法：将曝光新闻数据存储到Redis[3]中；设置曝光时间，删除重复的曝光新闻，并按照下列格式存储到Redis[3]的`user_exposure`中：
+
+     ```
+     user_exposure:<用户ID>: {<新闻ID>:<曝光时间>} 
+     ```
+
+
+
