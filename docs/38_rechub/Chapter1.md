@@ -67,6 +67,14 @@
 # Data_loader
 # x: the training feature
 # y: labels
+from torch_rechub.basic.features import DenseFeature, SparseFeature
+
+dense_feas = [DenseFeature(feature_name) for feature_name in dense_features]
+sparse_feas = [SparseFeature(feature_name, vocab_size=data[feature_name].nunique(), embed_dim=16) for feature_name in sparse_features]
+y = data["label"]
+del data["label"]
+x = data
+
 data_generator = DataGenerator(x, y)
 ```
 
