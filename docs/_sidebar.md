@@ -23,5 +23,5 @@
       - Chapter4 前后端交互逻辑（未详细记录）
       - [Chapter5 推荐系统流程](32_Recomentdation/Chapter5.md)
     - 第38期：复现推荐系统模型
-      - [Chapter1 推荐系统的基本流程](38_rechub/Chapter1.md)
+      - [Chapter1 基本框架及简易模型的搭建](38_rechub/Chapter1.md)
 

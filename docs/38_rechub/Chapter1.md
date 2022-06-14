@@ -59,3 +59,62 @@
 
 ## 2. 构建案例
 
+完整代码见：https://colab.research.google.com/drive/1SWUj0DTvQ2hixDONc1REsHSYu4hUJMvg?usp=sharing
+
+这里介绍一下模型搭建的部分，略过数据处理
+
+```python
+# Data_loader
+# x: the training feature
+# y: labels
+data_generator = DataGenerator(x, y)
+```
+
+```python
+# train_val split
+batch_size = 2048
+# split 70% data for training, 10% for validating and the remaining 20% for testing
+train_ratio = 0.7
+val_ratio = 0.1
+train_dataloader, val_dataloader, test_dataloader = data_generator.generate_dataloader(split_ratio=[train_ratio, val_ratio], batch_size=batch_size)
+```
+
+```python
+# parameter
+learning_rate = 1e-3
+weight_decay = 1e-3
+epoch = 2
+mlp_params={
+    "dims": [256, 128], 
+    "dropout": 0.2, 
+    "activation": "relu"}
+device = 'cuda:0'
+save_dir = './models/'
+
+```
+
+```python
+# define model(WideDeep as sample)
+model = WideDeep(wide_features=dense_feas, deep_features=sparse_feas, mlp_params=mlp_params)
+
+# define optimizer
+optimizer_params={
+    "lr": learning_rate, 
+    "weight_decay": weight_decay}
+
+# define trainer
+ctr_trainer = CTRTrainer(model, optimizer_params=optimizer_params, n_epoch=epoch, earlystop_patience=10, 
+                         device=device, model_path=save_dir)
+```
+
+```python
+# training
+ctr_trainer.fit(train_dataloader, val_dataloader)
+```
+
+```python
+# validation
+auc = ctr_trainer.evaluate(ctr_trainer.model, test_dataloader)
+print(f'test auc: {auc}')
+```
+
