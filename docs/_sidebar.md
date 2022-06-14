@@ -12,22 +12,16 @@
       * [Chapter1 Introduction to matplotlib](29_Matplotlib/ch1.md)
       * [Chapter2 Basic plots](29_Matplotlib/ch2.md)
       * [Chapter3 Layout and style](29_Matplotlib/ch3.md)
-      
     - 第30期：决策树及集成学习
       - [Chapter1 Decision Trees](30_Decisiontree/Chapter1.md)
       - [Task 1: CART Tree Algorithm in python](30_Decisiontree/Task2.md)
       - [Chapter2 Ensemble modes](30_Decisiontree/Chapter2.md)
-    
     - 第32期：推荐系统的流程搭建
       - [Chapter1 推荐系统的基本流程](32_Recomentdation/Chapter1.md)
-      
       - [Chapter2 数据库的基本使用](32_Recomentdation/Chapter2.md)
-      
       - [Chapter3 物料爬取与用户画像构建](32_Recomentdation/Chapter3.md)
-      
       - Chapter4 前后端交互逻辑（未详细记录）
-      
       - [Chapter5 推荐系统流程](32_Recomentdation/Chapter5.md)
-      
-        
+    - 第38期：复现推荐系统模型
+      - [Chapter1 推荐系统的基本流程](38_rechub/Chapter1.md)
 
