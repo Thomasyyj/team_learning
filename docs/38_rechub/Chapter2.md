@@ -1,251 +1,95 @@
-# Task2:数据库的基本使用
+# Task2 精排模型：DeepFM, DIN
 
-![](material/ch1-overview.png)
+## DeepFM模型
 
-本节中我们主要来了解各个数据库的基本使用方法
+1. 模型产生动机：如何高效地学习特征组合？
 
-## 1.MySQL的基本使用方法
+   为了解决这个问题，出现了FM和FFM来优化LR的特征组合较差这一个问题。并且在这个时候科学家们已经发现了DNN在特征组合方面的优势，所以又出现了FNN和PNN等使用深度网络的模型。但是DNN也存在局限性。
 
-### 1.1 SQL基本语句规范
+   - DNN局限：维度灾难（输入时onehot会导致维度大大增加）。为了解决这个问题，我们通过不将所有编码全连接，分而治之来降低参数，如图所示：
 
-- 所有语句以分号（;）结尾
-- 语句不区分大小写
-- 插入到表中的数据区分大小写
-- 常数：
-  * sql中直接写的**字符串，数字或者日期**叫做常数
-  * 字符串与日期：用单引号（''）分隔开，如:('abc')
-  * 数字：直接写即可
-- SQL中的注释主要采用`--`和`/* ... */`的方式，第二种方式可以换行。在MySQL下，还可以通过`#`来进行注释。
+   ![](material/ch2-1.png)
 
-### 1.2 命名规则
+   ![](material/ch2-2.png)
 
-- 在数据库中，只能使用半角英文字母、数字、下划线（_）作为数据库、表和列的名称 。
-- 名称必须以半角英文字母作为开头。
-- 名称不能重复，同一个数据库下不能有2张相同的表。
+   这个时候再通过一个全联接层就可以实现高阶特征的组合，如：
 
-### 1.3 数据类型
+   ![](material/ch2-3.png)
 
-Mysql支持所有SQL数值数据类型，其中包括：数值类，日期时间类（datetime，date，timestamp等），字符串类
+   但是低阶特征的特征组合仍然没有考虑到，因此我们用FM来表示低阶特征的特征组合，最后想办法结合FM和DNN来构造最终的网络。
 
-### 1.4 数据库的基本操作
+   - FNN和PNN：    我们先来了解一下FNN的思想，这对之后理解DeepFM比较有帮助。
 
-#### 1.4.1 数据库的创建：
+     FNN的思想比较简单，直接在预训练好的FM上接入若干全连接层。利用DNN对特征进行隐式交叉，可以减轻特征工程的工作，同时也能够将计算时间复杂度控制在一个合理的范围内（如图所示  ：w代表一阶特征的权重，$v_i, v_j$代表fm训练好的隐向量）。后来演变成了PNN。
 
-通过create语句创建
+     ![](material/ch2-fnn.jpeg)
 
-```mysql
-create database [if not exists] <数据库名称>;
-```
+     因为有人发现在Embedding layer和hidden layer1 中增加一个product层可以提高模型的表现，于是使用product layer替换了FM预训练层，形成如下结构，提出了PNN
 
-MySQL 的数据存储区将以目录方式表示 MySQL 数据库，因此数据库名称必须符合操作系统的文件夹命名规则，不能以数字开头，尽量要有实际意义。e.g:
+     ![](material/ch2-4.png)
 
-```mysql
-create database if not exists shop;
-```
+   - Wide&Deep：纵观以上模型，我们发现尽管FNN和PNN模型能够学好低阶组合特征，但是再串行通过全连接层后还是相当于学了高阶特征，低阶特征本身无法在DNN的输出端有较好的表现。
 
-#### 1.4.2数据库的查看：
+     很自然的想到直接把低阶特征并行地加上去不就好了。于是google提出了Wide&Deep模型（如下所示）。虽然将整个模型的结构调整为了并行结构，在实际的使用中Wide Module中的部分需要较为精巧的特征工程，换句话说人工处理对于模型的效果具有比较大的影响（这一点可以在Wide&Deep模型部分得到验证）。
 
-- 查看所有存在的数据库
+     ![](material/ch2-wide&deep.png)
 
-  ```mysql
-  show databases [like '数据库名'];;
-  ```
+     缺陷：**在output Units阶段直接将低阶和高阶特征进行组合，很容易让模型最终偏向学习到低阶或者高阶的特征，而不能做到很好的结合。**
 
-  `LIKE`从句是可选项，用于匹配指定的数据库名称。`LIKE` 从句可以部分匹配，也可以完全匹配。
+     然后综合以上所有思想，我们就得到了DeepFM
 
-  e.g:
+     
 
-  ```mysql
-  SHOW DATABASES LIKE 'S%';
-  ```
+2. DeepFM模型结构与原理
 
-- 查看创建的数据库
+   先来看一下模型结构：
 
-  ```mysql
-  SHOW CREATE DATABASES <数据库名>;
-  ```
+   ![](material/ch2-DeepFM-1.png)
 
-  e.g:
+   对比着wide&deep模型来看：
 
-  ```mysql
-  SHOW CREATE DATABASES shop;
-  ```
+   特征部分（绿框）：处理方式和上面相同，将稀疏向量变成稠密embedding
 
-#### 1.4.3 选择数据库
+   wide部分（蓝框）：将fm layer替换了原来的wide部分。
 
-在操作数据库前，必须指定所要操作的数据库。可以通过`USE`命令切换到对应的数据库下。
+   然后我们把fm部分和deep部分的拆开来看
 
-```mysql
-USE <数据库名>
-```
+   - FM部分
 
-#### 1.4.4 删除数据库
+     数学表示：$\hat{y}_{FM}(x)=w_0+\sum_{i=1}^{N}w_ix_i+\sum_{i=1}^{N}\sum_{j=i+1}^{N}v_i^Tv_jx_ix_j$
 
-```mysql
-DROP DATABASE [IF EXISTS] <数据库名>;
-```
+     含义：输出=偏置+一阶特征组合+权重*二阶特征交叉，其中权重为两个特征的embedding内积，FM训练的就是这个权重embedding。
 
-### 1.5 表的基本操作
+     架构图：
 
-表相当于文件，表中的一条记录就相当于文件的一行内容，不同的是，表中的一条记录有对应的标题，称为表的字段。
+     ![](material/ch2-DeepFM-2.png)
 
-#### 1.5.1 表的创建
+     从图中可以看出，我们单独考虑了linear部分和FM特征交叉部分
 
-语法结构为
+   - Deep部分
 
-```mysql
-CREATE TABLE <表名> （<字段1> <数据类型> <该列所需约束>，
-   <字段2> <数据类型> <该列所需约束>，
-   <字段3> <数据类型> <该列所需约束>，
-   <字段4> <数据类型> <该列所需约束>，
-   .
-   .
-   .
-   <该表的约束1>， <该表的约束2>，……）；
-```
+     架构图：
 
-e.g:
+     ![](material/ch2-DeepFM-3.png)
 
-```mysql
-CREATE TABLE Product(
-  product_id CHAR(4) NOT NULL,
-  product_name VARCHAR(100) NOT NULL,
-  procut_type VARCHAR(32) NOT NULL,
-  sale_price INT,
-  purchase_price INT,
-  regist_date DATE,
-  PRIMARY KEY(product_id)
-);
-```
+     Deep Module的目的是为了学习高阶的特征组合，在上图中使用用全连接的方式将Dense Embedding输入到Hidden Layer，这里面Dense Embeddings同样是为了解决DNN中的参数爆炸问题。
 
-在第二章中，我们介绍过不同的数据类型:
+     在经过两层mlp后直接加入sigmoid函数激活，就是deep部分的整体架构
 
-其中`CHAR`为定长字符，这里`CHAR`旁边括号里的数字表示该字段最长为多少字符，少于该数字将会使用空格进行填充。
+3. 代码实战
 
-`VARCHAR`表示变长字符，括号里的数字表示该字段最长为多少字符，存储时只会按照字符的实际长度来存储，但会使用额外的1-2字节来存储值长度。
+   代码链接：https://colab.research.google.com/drive/1dSASWaBFf50Z1rw4itqENDkv1MIvIiWL?usp=sharing 
 
-简单介绍一下该语句中出现的约束条件，约束条件在后面会详细介绍：
+   链接中包含DeepFM, Wide&Deep，DCN的简易实现方式，以及DeepFM借助rechub组件的复现方式。
 
-- `PRIMARY KEY`：主键，表示该字段对应的内容唯一且不能为空。
-- `NOT NULL`：在 `NULL` 之前加上了表示否定的` NOT`，表示该字段不能输入空白。
+   总结一下，框架和sample里搭的框架一摸一样，就是模型的参数需要记一下.
 
-通过`SHOW TABLES`命令来查看当前数据库下的所有的表名：
+   DeepFM主要参数如下：
 
-```mysql
-SHOW TABLES;
-```
+   - deep_features指用deep模块训练的特征（兼容dense和sparse），
+   - fm_features指用fm模块训练的特征，只能传入sparse类型
+   - mlp_params指定deep模块中，MLP层的参数
 
-通过DESE<表名>来查看表的结构：
+   
 
-```mysql
-DESC Product;
-```
-
-
-
-#### 1.5.2 表的删除
-
-删除表的情况，直接用drop指令
-
-```mysql
-DROP TABLE <表名>;
-
--- 例如：DROP TABLE Product;
-```
-
-说明：通过`DROP`删除的表示无法恢复的，在删除表的时候请谨慎。
-
-#### 1.5.3 表的字段的修改
-
-通过`ALTER TABLE`语句，我们可以对表字段进行不同的操作，下面通过示例来具体学习用法。
-
-e.g:
-
-首先我们创建一张名为student的表
-
-```mysql
-CREATE TABLE Student(
-  id INT PRIMARY KEY,
-  name CHAR(15)
-); 
-```
-
-```mysql
-DESE Student;
-```
-
-1. 操作：更改表名（通过rename）
-
-```mysql
-ALTER TABLE Student RENAME Students;
-```
-
-2. 操作：插入新的字段（通过add）
-
-```mysql
--- 不同字段通过逗号分开
-ALTER TABLE Students ADD sex CHAR(1), ADD age INT;
-```
-
-3. 其它插入
-
-```mysql
--- 在表首插入字段
-ALTER TABLE Students ADD stu_num INT FIRST;
-
--- 在某指定字段后插入height
-ALTER TABLE Students ADD height INT AFTER sex;
-```
-
-4. 字段的删除
-
-```mysql
--- 删除字段stu_num
-ALTER TABLE Students DROP stu_num;
-```
-
-5. 字段的修改
-
-   1. d通过`MODIFY`修改字段的数据类型。
-
-      ```mysql
-      -- 修改字段age的数据类型
-      ALTER TABLE Students MODIFY age CHAR(3);
-      ```
-
-   2. 通过change命令，修改字段名或类型
-
-      ```mysql
-      -- 修改字段name为stu_name，不修改数据类型
-      ALTER TABLE Students CHANGE name stu_name CHAR(15);
-      
-      -- 修改字段sex为stu_sex，数据类型修改为int
-      ALTER TABLE Students CHANGE sex stu_sex INT;
-      ```
-
-#### 1.5.4 表的查询
-
-sql语句主要通过select语句来查询，语法结构为
-
-```mysql
-SELECT <字段名>, ……
- FROM <表名>;
-```
-
-如果要直接查询全部字段
-
-```mysql
-SELECT *
- FROM <表名>;
-```
-
-其中，**星号（*）**代表全部字段的意思。
-
-
-
-#### 1.5.5 表的复制
-
-
-
-
-
+​		
