@@ -245,7 +245,11 @@
 
      此外相比注意力机制，这里的权重系数最终没有做归一化处理，目的是为了保留用户的兴趣强度（如果进行归一化了，相当于变成了百分比，那么历史购买记录很多的人对于每个物品的兴趣的权重会变得很小，不利于和历史购买记录少的人一起比较）
 
-   - 然后我们来看下这个activation unit中究竟干了什么事情，对于注意力机制，其实有很多算权重的办法（比如算cand与history间的余弦相似度等，核心在于要表达出相似性）。这里的Activation unit中采用的操作是把输入的history和candidate先做element-wise product（每个位置的元素相乘，来表达相似度），然后把相乘的embedding和原先的embedding拼接，拼接后进入mlp最终输出一个weight，为什么要用这种结构有待考察（其实个人感觉如果是为了表示相似度，其它有大量的方法可以完成这个事情），这部分内容需要补充
+   - 然后我们来看下这个activation unit中究竟干了什么事情，对于注意力机制，其实有很多算权重的办法（比如算cand与history间的余弦相似度等，核心在于要表达出相似性）。这里的Activation unit中采用的操作是把输入的history和candidate先做element-wise product（每个位置的元素相乘，来表达相似度），然后把相乘的embedding和原先的embedding拼接，拼接后进入mlp最终输出一个weight，
+
+     为什么要用这种结构?（其实个人感觉如果是为了表示相似度，其它有大量的方法可以完成这个事情）
+
+     个人理解：这个注意力权重也是需要学的，因此必须用mlp结构来使得模型具有学习能力。这里通过拼接embedding的方式使模型既考虑了history与cand的相似度，也考虑到了history和cand物品本身（和fm的结构类似）
 
 4. 训练方式
 
@@ -295,11 +299,39 @@
           $$
           其中只有第m个小批量中的特征参数参与正则化计算
 
-   2. **Mini-batch Aware Regularization**
+   2. **Data Adaptive Activation Function**
+
+      - 面临问题
+
+        - ICS问题（每层输入的数据分布可能不一样，从而引发一系列问题）
+
+          比如使用PRelu激活函数，如果数据大部分分布在小于0的部分时，梯度更新会非常慢，会产生梯度消失的问题
+
+          ![](material/ch2-din-prelu.png)
+
+        - 解决方案的思路在于1）手动改变数据分布(Batch-normalization)
+
+          2）设计一个可以自动适应数据分布的一个激活函数（将函数向左/向右平移）
+
+      - 解决方案：
+
+        1. 使用数据的均值E[s]来决定激活函数断点（非线性点）的位置
+
+           ![](material/ch2-din-prelu2.png)
+
+        2. 使用sigmoid函数代替p(s)，来使得激活函数更加平滑
+
+        由此得到了dice激活函数
+
+        ![](material/ch2-din-sigmoid.png)
+
+        ![](material/ch2-din-activatefunc.png)
+
+        对于f(s)图像，我们由均值控制左右移动，方差控制平滑度的胖瘦
 
    
 
-
+​	
 
 
 
