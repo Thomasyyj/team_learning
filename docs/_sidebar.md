@@ -26,4 +26,5 @@
       - [Chapter1 基本框架及简易模型的搭建](38_rechub/Chapter1.md)
       - [Chapter2 精排模型：DeepFM, DIN](38_rechub/Chapter2.md)
       - [Chapter3 召回模型：DSSM, YoutubeDNN](38_rechub/Chapter3.md)
+      - [Chapter4 多任务模型：ESMM, MMoE](38_rechub/Chapter4.md)
 

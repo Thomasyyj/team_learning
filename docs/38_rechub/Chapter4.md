@@ -1,311 +1,213 @@
-# Task5:推荐系统流程
-
-![](material/ch1-overview.png)
-
-本次任务主要介绍推荐系统的流程构建，主要分为线下部分和线上部分，每个部分中又分了两套推荐逻辑，分别对应热门页和推荐页面。
-
-总体逻辑：召回+排序+重排；
-
-线下部分总结：是根据已有的数据，为不同用户对应的热门页和推荐页列表。同时生成冷启动页面存入redis中；
-
-线上部分总结：对于新用户：拉取冷启动页面+重排（对重复曝光去重），对于老用户：拉取推荐列表+重排，最后展示到前端。
-
-在后续加入具体算法模型后，线上与线下会分别加入不同的模型（比如线上为了运算速度会牺牲模型复杂度减少计算资源的消耗，线下则会运用复杂的模型计算）。
-
-## 1.Offline
-
-### 1.1 热门页构建
-
-1. 流程：
-
-   - 基于物料画像（离线物料系统生成的画像，`MongoDB`的`NewsRecSys`库的`FeatureProtail`集合数据）以及交互反馈数据（阅读，收藏，点赞）计算热度值
-
-     热度值计算公式：
-
-     ```python
-     `news_hot_value = (news_likes_num * 0.6 + news_collections_num * 0.3 + news_read_num * 0.1) * 10 / (1 + time_hour_diff / 72)
-     
-     ```
-
-     **注：** 上述公式源自魔方秀公式： 魔方秀热度 = (总赞数 * 0.7 + 总评论数 * 0.3) * 1000 / (公布时间距离当前时间的小时差+2) ^ 1.2
-
-     最初的公式为Hacker News算法： Score = (P-1) / (T+2)^G 其中P表示文章得到的投票数，需要去掉文章发布者的那一票；T表示时间衰减（单位小时）；G为权重，默认值为1.8
-
-   - 将所有新闻按照类别，将热门列表存入缓存中，提供给`Online`的热门页列表
-
-2. 代码逻辑
-
-   代码位于`recprocess/recall/hot_recall.py`。完整代码如下。
-
-    ```python
-    def update_hot_value(self):
-            """更新物料库中所有新闻的热度值
-            """
-            # 遍历物料池里面的所有文章
-            for item in self.feature_protrail_collection.find():
-                news_id = item['news_id']
-                news_cate = item['cate']
-                news_ctime = item['ctime']
-                news_likes_num = item['likes']
-                news_collections_num = item['collections']
-                news_read_num = item['read_num']
-                news_hot_value = item['hot_value']
-    
-                # 时间转换与计算时间差   前提要保证当前时间大于新闻创建时间，目前没有捕捉异常
-                news_ctime_standard = datetime.strptime(news_ctime, "%Y-%m-%d %H:%M")
-                cur_time_standard = datetime.now()
-                time_day_diff = (cur_time_standard - news_ctime_standard).days
-                time_hour_diff = (cur_time_standard - news_ctime_standard).seconds / 3600
-    
-                # 只要最近3天的内容
-                if time_day_diff > 3:
-                    continue
-    
-                # 72 表示的是3天，
-                news_hot_value = (news_likes_num * 0.6 + news_collections_num * 0.3 + news_read_num * 0.1) * 10 / (1 + time_hour_diff / 72) 
-    
-                # 更新物料池的文章hot_value
-                item['hot_value'] = news_hot_value
-                self.feature_protrail_collection.update({'news_id':news_id}, item)
-    
-        def get_hot_rec_list(self):
-            """获取物料的点赞，收藏和创建时间等信息，计算热度并生成热度推荐列表存入redis
-            """
-            # 遍历物料池里面的所有文章
-            for item in self.feature_protrail_collection.find():
-                news_id = item['news_id']
-                news_cate = item['cate']
-                news_ctime = item['ctime']
-                news_likes_num = item['likes']
-                news_collections_num = item['collections']
-                news_read_num = item['read_num']
-                news_hot_value = item['hot_value']
-    
-                #print(news_id, news_cate, news_ctime, news_likes_num, news_collections_num, news_read_num, news_hot_value)
-    
-                # 时间转换与计算时间差   前提要保证当前时间大于新闻创建时间，目前没有捕捉异常
-                news_ctime_standard = datetime.strptime(news_ctime, "%Y-%m-%d %H:%M")
-                cur_time_standard = datetime.now()
-                time_day_diff = (cur_time_standard - news_ctime_standard).days
-                time_hour_diff = (cur_time_standard - news_ctime_standard).seconds / 3600
-    
-                # 只要最近3天的内容
-                if time_day_diff > 3:
-                    continue
-                
-                # 计算热度分，这里使用魔方秀热度公式， 可以进行调整, read_num 上一次的 hot_value  上一次的hot_value用加？  因为like_num这些也都是累加上来的， 所以这里计算的并不是增值，而是实时热度吧
-                # news_hot_value = (news_likes_num * 6 + news_collections_num * 3 + news_read_num * 1) * 10 / (time_hour_diff+1)**1.2
-                # 72 表示的是3天，
-                news_hot_value = (news_likes_num * 0.6 + news_collections_num * 0.3 + news_read_num * 0.1) * 10 / (1 + time_hour_diff / 72) 
-    
-                #print(news_likes_num, news_collections_num, time_hour_diff)
-    
-                # 更新物料池的文章hot_value
-                item['hot_value'] = news_hot_value
-                self.feature_protrail_collection.update({'news_id':news_id}, item)
-    
-                #print("news_hot_value: ", news_hot_value)
-    
-                # 保存到redis中
-                self.reclist_redis.zadd('hot_list', {'{}_{}'.format(news_cate, news_id): news_hot_value}, nx=True)
-    
-    
-        def group_cate_for_news_list_to_redis(self, ):
-            """将每个用户的推荐列表按照类别分开，方便后续打散策略的实现
-            对于热门页来说，只需要提前将所有的类别新闻都分组聚合就行，后面单独取就可以
-            注意：运行当前脚本的时候需要需要先更新新闻的热度值
-            """
-            # 1. 按照类别先将所有的新闻都分开存储
-            for cate_id, cate_name in self.cate_dict.items():
-                redis_key = "news_cate:{}".format(cate_id)
-                for item in self.feature_protrail_collection.find({"cate": cate_name}):
-                    self.reclist_redis.zadd(redis_key, {'{}_{}'.format(item['cate'], item['news_id']): item['hot_value']})
-    ```
-
-   - `update_hot_value()`方法：主要用于更新物料中所有新闻的热度值，通过遍历`MongoDB`的`NewsRecSys`库的`FeatureProtail`集合数据，选取最近3天发布的新闻，进行热度值的计算，并更新`hot_value`字段（初始值为1000）
-
-   - `group_cate_for_news_list_to_redis()`方法：主要用于将物料库（`FeatureProtail`集合），通过遍历各类新闻，按照下面形式存入Redis[0]的`hot_list_news_cate`中：
-
-     ```
-     hot_list_news_cate:<新闻类别标识>: {<新闻类别名>_<新闻id>:<热度值>}
-     
-     ```
-
-### 1.2 推荐页构建
-
-1. 流程
-
-   - 针对注册用户，建立冷启动的推荐页列表数据，通过用户年龄、性别指定用户群，自定义用户的新闻类别，根据新闻热度值，生成冷启动的推荐列表
-
-   - 针对老用户，提供个性化推荐，目前该系统没有提供千人千面的推荐功能，需要使用机器学习流程来完成这一部分功能
-
-2. 代码逻辑
-
-   这段代码实现的逻辑和实际流程有些不一样。我们先自定义了四组用户类型，根据四组用户类型先储存好所有的新闻（相当于做好了冷启动列表），之后再根据用户的画像把用户分成四类人，然后把对应的新闻一起储存进去。
-
-   思考：在后续阶段，我认为自定义固定数量的用户画像是不合理的，这个应该需要通过机器学习模型来学。
-
-   - 初始定义用户类型
-
-     ```python
-     def _set_user_group(self):
-             """将用户进行分组
-             1. age < 23 && gender == female  
-             2. age >= 23 && gender == female 
-             3. age < 23 && gender == male 
-             4. age >= 23 && gender == male  
-             """
-             self.user_group = {
-                 "1": ["国内","娱乐","体育","科技"],
-                 "2": ["国内","社会","美股","财经","股市"],
-                 "3": ["国内","股市","体育","科技"],
-                 "4": ["国际", "国内","军事","社会","美股","财经","股市"]
-             }
-             self.group_to_cate_id_dict = defaultdict(list)
-             for k, cate_list in self.user_group.items():
-                 for cate in cate_list:
-                     self.group_to_cate_id_dict[k].append(self.name2id_cate_dict[cate])
-     ```
-
-   - `generate_cold_user_strategy_templete_to_redis_v2()`方法：
-
-     这段代码的目的是先生成冷启动的列表。按照4类自定义的用户类型，遍历各类别中的新闻类型，将物料库（`MongoDB`的`NewsRecSys`库的`FeatureProtail`集合数据）中对应的新闻热度值存入Redis[0]的`cold_start_group`中:
-
-     ```python
-     def generate_cold_user_strategy_templete_to_redis_v2(self):
-             """冷启动用户模板，总共分成了四类人群
-             每类人群都把每个类别的新闻单独存储
-             """
-             for k, item in self.user_group.items():
-                 for cate in item:
-                     cate_cnt = 0
-                     cate_id = self.name2id_cate_dict[cate]
-                     # k 表示人群分组
-                     redis_key = "cold_start_group:{}:{}".format(str(k), cate_id)
-                     for news_info in self.feature_protrail_collection.find({"cate": cate}):
-                         cate_cnt += 1
-                         self.reclist_redis.zadd(redis_key, {news_info['cate'] + '_' + news_info['news_id']: news_info['hot_value']}, nx=True)
-                     print("类别 {} 的 新闻数量为 {}".format(cate, cate_cnt))
-     
-     ```
-
-   - `user_news_info_to_redis()`方法：
-
-     ```python
-     def user_news_info_to_redis(self):
-             """将每个用户涉及到的不同的新闻列表添加到redis中去
-             """
-             for user_info in self.register_user_sess.query(RegisterUser).all():
-                 if int(user_info.age) < 23 and user_info.gender == "female":
-                     self._copy_cold_start_list_to_redis(user_info.userid, group_id="1")
-                 elif int(user_info.age) >= 23 and user_info.gender == "female":
-                     self._copy_cold_start_list_to_redis(user_info.userid, group_id="2")
-                 elif int(user_info.age) < 23 and user_info.gender == "male":
-                     self._copy_cold_start_list_to_redis(user_info.userid, group_id="3")
-                 elif int(user_info.age) >= 23 and user_info.gender == "male":
-                     self._copy_cold_start_list_to_redis(user_info.userid, group_id="4")
-                 else:
-                     pass 
-     def _copy_cold_start_list_to_redis(self, user_id, group_id):
-             """将确定分组后的用户的物料添加到redis中，并记录当前用户的所有新闻类别id
-             """
-             # 遍历当前分组的新闻类别
-             for cate_id in self.group_to_cate_id_dict[group_id]:
-                 group_redis_key = "cold_start_group:{}:{}".format(group_id, cate_id)
-                 user_redis_key = "cold_start_user:{}:{}".format(user_id, cate_id)
-                 self.reclist_redis.zunionstore(user_redis_key, [group_redis_key])
-             # 将用户的类别集合添加到redis中
-             cate_id_set_redis_key = "cold_start_user_cate_set:{}".format(user_id)
-             self.reclist_redis.sadd(cate_id_set_redis_key, *self.group_to_cate_id_dict[group_id])
-     ```
-
-     1. 按照用户、新闻分类提供用户冷启动的推荐模板；遍历所有用户，针对每个用户分类，从Redis[0]的`cold_start_group`中取出新闻热度值，按照以下形式存入Redis[0]的`cold_start_user`中：
-
-        ```
-        cold_start_user:<用户ID>:<新闻类别标识>: {<新闻类别名>_<新闻id>:<热度值>}
-        
-        ```
-
-     2. 按照用户提供用户的新闻类别标识；针对每个用户，将用户的类别集合按照以下形式存入Redis[0]的`cold_start_user_cate_set`中：
-
-        ```
-        cold_start_user_cate_set:<用户ID>: {<新闻类别标识>}
-        
-        ```
-
-## 2.Online
-
-### 2.1 热门页列表构建
-
-1. 流程
-
-   - 获取用户曝光列表，得到所有的新闻ID
-   - 针对新用户，从之前的离线热门页列表中，为该用户生成一份热门页列表，针对老用户，直接获取该用户的热门页列表
-   - 对上述热门列表，每次选取10条新闻，进行页面展示
-   - 对已选取的10条新闻，更新曝光记录
-
-2. 代码
-
-   代码位于`recprocess/online.py`
-
-   - `_get_user_expose_set()`方法：主要获取用户曝光列表，得到所有的新闻ID；该数据存储在Redis[3]中，数据格式如下：
-
-     ```
-     user_exposure:<用户ID>: {<新闻ID>:<曝光时间>} Copy to clipboardErrorCopied
-     ```
-
-   - `_judge_and_get_user_reverse_index()`方法：用于判断用户是否存在热门页列表，如果用户是新用户，根据Redis[0]的`hot_list_news_cate`中的数据，复制创建该用户的热门页列表，具体数据格式如下：
-
-     ```
-     user_id_hot_list:<用户ID>:<新闻分类标识>: {<新闻类别名>_<新闻id>:<热度值>}Copy to clipboardErrorCopied
-     ```
-
-   - `_get_polling_rec_list()`方法：通过轮询方式获取用户的展示列表，每次只取出10条新闻；通过while循环方式，从Redis[0]的`user_id_hot_list:<用户ID>:<新闻分类标识>`中选取新闻，之后删除已选取的新闻，并把选取的10条新闻内容放到用户新闻（`user_news_list`）数组中，新闻ID放到曝光列表（`exposure_news_list`）中
-
-   - `_save_user_exposure()`方法：将曝光新闻数据存储到Redis[3]中；设置曝光时间，删除重复的曝光新闻，并按照下列格式存储到Redis[3]的`user_exposure`中：
-
-     ```
-     user_exposure:<用户ID>: {<新闻ID>:<曝光时间>} Copy to clipboard
-     ```
-
-### 2.2 推荐页列表构建
-
-1. 流程
-
-   - 获取用户曝光列表，得到所有的新闻ID
-   - 针对新用户，从之前的离线推荐页列表中，为该用户生成一份推荐页列表，针对老用户，直接获取该用户的推荐页列表
-   - 对上述热门列表，每次选取10条新闻，进行页面展示
-   - 对已选取的10条新闻，更新曝光记录
-
-2. 代码
-
-   代码位于`recprocess/online.py`
-
-   - `_get_user_expose_set()`方法：主要获取用户曝光列表，得到所有的新闻ID；该数据存储在Redis[3]中，数据格式如下：
-
-     ```
-     user_exposure:<用户ID>: {<新闻ID>:<曝光时间>} Copy to clipboardErrorCopied
-     ```
-
-   - `_judge_and_get_user_reverse_index()`方法：用于判断用户是否存在冷启动列表，如果用户是新用户，获取分组ID，根据用户DI和分组ID，从Redis[0]的`cold_start_group`中的数据，复制创建该用户的推荐列表，具体数据格式如下：
-
-     ```
-     cold_start_user:<用户ID>:<新闻分类标识>: {<新闻类别名>_<新闻id>:<热度值>}Copy to clipboardErrorCopied
-     ```
-
-     将用户当前的新闻类别标识，存放到`cold_start_user_cate_set`中，具体格式如下：
-
-     ```
-     cold_start_user_cate_set:<用户ID>: {<新闻ID>}Copy to clipboardErrorCopied
-     ```
-
-   - `_get_polling_rec_list()`方法：通过轮询方式获取用户的展示列表，每次只取出10条新闻；通过while循环方式，从Redis[0]的`cold_start_user:<用户ID>:<新闻分类标识>`中选取新闻，之后删除已选取的新闻，并把选取的10条新闻内容放到用户新闻（`user_news_list`）数组中，新闻ID放到曝光列表（`exposure_news_list`）中
-
-   - `_save_user_exposure()`方法：将曝光新闻数据存储到Redis[3]中；设置曝光时间，删除重复的曝光新闻，并按照下列格式存储到Redis[3]的`user_exposure`中：
-
-     ```
-     user_exposure:<用户ID>: {<新闻ID>:<曝光时间>} 
-     ```
+# Task4 多任务模型：ESMM, MMOE
 
+## 一 背景知识
 
+1. **多任务多目标学习**
 
+   多任务(Multi-task learning)：指同时完成多个目标的机器学习方式
+
+   多目标(Multi-objective leaning)：时MTL的一种，在具体业务场景中，往往我们需要同时优化多个目标。比如视频推荐需要同时优化点击率和完播率，电商推荐需要同时优化点击率和转化率。如今CTR预估领域采用多任务多目标时比较主流的建模方式。
+
+   首先来厘清一些名词概念。如下图，解释了Multi-Task 与 Multi-Label等相关概念的关系。
+
+   Multi-Task learning：多任务学习建模多个任务之间的关联关系，任务输入可以是不同的feature/sample，如BERT的MLM预训练任务与NSP任务，两个任务先后训练，输入是不同的feature和sample。这是Multi-Input & Multi-Output （MIMO） 的类型，常用的训练模式是pre-train+finetuning 和 多任务co-train交替训练。
+
+   Multi-Label learning：还有一种是Single-Input & Multi-Output （SIMO） ，就是非常常见的Multi-Label Learning，建模相同feature、相同Sample上多个label之间的关系。也常称之为多目标Multi-Objective。如CV领域中，对同一image，可以同时对semantic classification，depth regression，instance regression等诸多经典任务目标共同学习。CTR领域，对同一输入样本同时预估点击率、转化率多个目标。常用的训练模式是Joint-train的模式，形式化地表达如下：
+   $$
+   L=min_{\theta}\sum_{t=1}^{T}\alpha^tL^t(\theta_{sh},\theta_{t})
+   $$
+   其中$\theta_{sh}$是多任务共享参数，$\theta_{t}$是任务t 的独享参数，Joint-train的总Loss是各个子任务对应Loss的带权求和。本文后面称的多任务多目标学习，默认是这种建模方式。
+
+2. 优势与挑战
+
+   - 优势：共享参数会在效果和性能层面带来优势
+
+     效果：多任务学习的效果提升原因如下：
+
+     - 任务互助：某个任务难以学到的特征，可以通过其它特征学习。
+     - 隐式数据增强：不同任务噪声不同，一起学习可抵消部分噪声。多个任务共同学习，能够缓解某些任务样本稀疏导致的过拟合。
+     - 提高通用性，增强泛化能力：模型学到的是对所有任务通用的权重，有助于推广到新任务。
+
+     性能：多任务较N个单任务网络参数量总和显著降低，在实时预测场景下MTL模型效率也更高。
+
+   - 挑战：
+
+     多任务多目标为了实现 1+1>2，在任务参数空间上设置了假设，例如:任务参数应该彼此靠近，w.r.t.一些距离度量，共享一个共同的概率先验，或驻留在一个低维子空间或流形。当所有任务都是相关的时候，这些假设可以很好地工作，但是如果在不相关的任务之间发生信息共享，则大概率导致效果下降，出现跷跷板（某个任务效果变好，另一个变差）、负迁移（所有效果都变差）的现象。
+
+   因此多任务领域核心的研究问题在于：**如何能够利用好共享的参数，多个任务互相帮助，共同提升**
+
+## 二 多任务学习研究目标概览
+
+多任务学习的核心优势在于通过不同的网络之间的参数共享，实现1+1>2的效果。目前主流的研究方向有两个。
+
+- 网络结构设计：
+
+  研究哪些参数可以共享，在什么位置共享，如何共享。
+
+  主要分为两大类：
+
+  - 设计网络结构时，考虑目标间的显式关系（例如淘宝中，点击之后才有购买行为发生），以阿里提出的ESMM为代表；
+
+  - 目标间没有显示关系（例如短视频中的收藏与分享），在设计模型时不考虑label之间的量化关系，以谷歌提出的MMOE为代表。
+
+- 多loss的优化策略：
+
+  主要解决loss数值有大有小、学习速度有快有慢、更新方向时而相反的问题。最经典的两个工作有：
+
+  UWL（Uncertainty Weight）：通过自动学习任务的uncertainty，给uncertainty大的任务小权重，uncertainty小的任务大权重；
+
+  GradNorm：结合任务梯度的二范数和loss下降梯度，引入带权重的损失函数Gradient Loss，并通过梯度下降更新该权重。
+
+然后我们来看一下几种简单的实现方式：
+
+### loss加权融合
+
+一种最简单的实现多任务学习的方式是对不同任务的loss进行加权。例如谷歌的Youtube DNN论文中提到的一种加权交叉熵：
+$$
+\text { Weighted CE Loss }=-\sum_{i}\left[T_{i} y_{i} \log p_{i}+\left(1-y_{i}\right) \log \left(1-p_{i}\right)\right] 
+$$
+其中$T_i$为观看时长。在原始训练数据中，正样本是视频展示后用户点击了该视频，负样本则是展示后未点击，这个一个标准的CTR预估问题。该loss通过改变训练样本的权重，让所有负样本的权重都为 1，而正样本的权重为点击后的视频观看时长 $T_i$。作者认为按点击率排序会倾向于把诱惑用户点击（用户未必真感兴趣)的视频排前面，而观看时长能更好地反映出用户对视频的兴趣，通过重新设计loss使得该模型在保证主目标点击的同时，将视频观看时长转化为样本的权重，达到优化平均观看时长的效果。
+
+另一种更为简单粗暴的加权方式是人工手动调整权重，例如 0.3*L(点击)+0.7*L\*(视频完播)
+
+这种loss加权的方式优点如下：
+
+- 模型简单，仅在训练时通过梯度乘以样本权重实现对其它目标的加权
+- 模型上线简单，和base完全相同，不需要额外开销
+
+缺点：
+
+- 本质上并不是多目标建模，而是将不同的目标转化为同一个目标。样本的加权权重需要根据AB测试才能确定。
+
+### Shared-Bottom
+
+最早的多任务学习模型是底层共享结构（Shared-Bottom），如图所示。
+
+![](material/ch4-sharedbottom.jpeg)
+
+通过共享底层模块，学习任务间通用的特征表征，再往上针对每一个任务设置一个Tower网络，每个Tower网络的参数由自身对应的任务目标进行学习。Shared Bottom可以根据自身数据特点，使用MLP、DeepFM、DCN、DIN等，Tower网络一般使用简单的MLP。
+
+优点：
+
+- 浅层参数共享，互相补充学习，任务相关性越高，模型loss优化效果越明显，也可以加速训练。
+
+缺点：
+
+- 任务不相关甚至优化目标相反时（例如新闻的点击与阅读时长），可能会带来负收益，多个任务性能一起下降。
+
+一般把Shared-Bottom的结构称作“参数硬共享”，多任务学习网络结构设计的发展方向便是如何设计更灵活的共享机制，从而实现“参数软共享”。
+
+## 三 ESMM模型
+
+我们先来看ESMM模型，**ESMM**(Entire Space Multi-Task Model)是2018年由阿里妈妈团队针对任务依赖而提出。比如电商推荐中的多目标预估经常是ctr和cvr，其中转换这个行为只有在点击发生后才会发生。
+
+1. 背景与动机
+
+   传统CVR预估问题中存在两个主要问题：样本选择偏差以及稀疏数据
+
+   - 样本选择偏差(Sample selection bias)：
+
+     首先我们来看一下业务场景中的数据：
+
+     ![](material/ch4-esmm-data.jpeg)
+
+     其中传统cvr训练的数据是{点击未转换，点击同时转换}（灰色圈），CTR训练的数据是{点击，未点击}（白色圈）。而在线上预测的场景下，一旦物品曝光，我们就需要推断出他们的CTR以及CVR来排序。按照传统的方案，就会出现训练推断样本不一致的情况，这一定程度上违背了机器学习中训练数据和测试数据独立同分布的假设。
+
+   - 训练数据稀疏(data sparsity)：转换样本只占点击样本中很小的一部分，如果只用点击后的数据训练cvr模型，可用的样本会极其稀疏。
+
+2. 解决方案
+
+   恰好多任务学习能够隐式地做数据增强，由此想到可以使用多任务学习来解决这个问题。我们用同样的数据同时优化CTR和CVR即可。同时ESMM又增加了CTCVR来进一步表示全样本的优化目标，三个预测任务如下：
+
+   - pCTR：$P(click=1 | impression)$
+
+   - pCVR：$P(conversion=1|click=1,impression)$
+
+   - pCTCVR：$P(conversion=1,click=1|impression)$
+
+     其中根据贝叶斯公式：
+     $$
+     pCTCVR=pCTR*pCVR
+     $$
+
+   于是基于之前的shared-bottom的模型改进，可以自然地想到对两个任务构建不同的DNN，输入dnn的底层参数共享，最后相乘出pCTCVR
+
+   模型架构如下：
+
+   ![](material/ch4-esmm.jpeg)
+
+   损失函数：损失函数由具有监督信息的CVR和CTCVR任务组成：
+   $$
+   L(\theta_{cvr},\theta_{ctr})=\sum_{i=1}^Nl(y_i,f(x_i;\theta_{ctr}))+\sum_{i=1}^Nl(y_i\&z_i,f(x_i;\theta_{ctr})\times f(x_i;\theta_{cvr})
+   $$
+   $l()$为交叉熵损失函数。
+
+   同时这里有些细节：
+
+   1. 为什么不使用CTCVR/CVR来得到CTR，用CTR来做有监督的标签？答案是由于CVR通常非常非常小，通过一个非常小的数作为分母容易引起数值不稳定的问题。事实上训练结果也不是很好(DIVISION的得分低于ESMM)
+
+   ![](material/ch4-esmm-division.jpeg)
+
+   - BASE：经典的CVR预测任务，也就是ESMM 左半边；
+   - AMAN、OVERSAMPLING、UNBIAS：分别是几种学术界缓解样本间偏差和数据稀疏问题的方法；
+   - DIVISION： 分别训练pCTCVR、pCTR，然后pCTCVR除以pCTR。
+   - ESMM-NS：不共享embedding 层的ESMM
+   - ESMM ：本文提出的模型。
+
+   2. loss比起直接相加可不可以引入带权重的相加？
+
+   模型是如何解决之前提出的两个问题的：？
+
+   - 帮助CVR模型在完整样本空间建模。
+     $$
+     p(x=1|y=1,x)=\frac{p(y=1,z=1|x)}{p(y=1|x)}
+     $$
+
+    从公式中可以看出，pCVR 可以由pCTR 和pCTCVR推导出。从原理上来说，相当于分别单独训练两个模型拟合出pCTR 和pCTCVR，再通过pCTCVR 除以pCTR 得到最终的拟合目标pCVR 。在训练过程中，模型只需要预测pCTCVR和pCTR，利用两种相加组成的联合loss更新参数。pCVR 只是一个中间变量。而pCTCVR和pCTR的数据是在完整样本空间中提取的，从而相当于pCVR也是在整个曝光样本空间中建模。
+
+   - 提供特征表达的迁移学习（embedding层共享）。CVR和CTR任务的两个子网络共享embedding层，网络的embedding层把大规模稀疏的输入数据映射到低维的表示向量，该层的参数占了整个网络参数的绝大部分，需要大量的训练样本才能充分学习得到。由于CTR任务的训练样本量要大大超过CVR任务的训练样本量，ESMM模型中特征表示共享的机制能够使得CVR子任务也能够从只有展现没有点击的样本中学习，从而能够极大地有利于缓解训练数据稀疏性问题。
+
+   模型训练完成后，可以同时预测cvr、ctr、ctcvr三个指标，线上根据实际需求进行融合或者只采用此模型得到的cvr预估值。
+
+## MMOE模型
+
+MMOE模型是2018年由谷歌提出的，全称是Multi-gate Mixture-of-Experts。解决的问题是如果hard bottom-share中多个任务相似性不是很强的话，底层embedding学习反而相互影响，最终都学不好的痛点
+
+1. 背景与动机：
+
+   我们先来回顾一下前文说的shared-bottom的方法：
+
+   ![](material/ch4-sharedbottom.jpeg)
+
+   - Hard-parameter sharing：直接共享底层所有参数。
+
+     这种方法目前用的也有，比如美团的猜你喜欢，知乎推荐的Ranking等， 这种方法最大的优势是Task越多， 单任务更加不可能过拟合，即可以减少任务之间过拟合的风险。 但是劣势也非常明显，就是底层强制的shared layers难以学习到适用于所有任务的有效表达。 **尤其是任务之间存在冲突的时候**。MMOE中给出了实验结论，当两个任务相关性没那么好(比如排序中的点击率与互动，点击与停留时长)，此时这种结果会遭受训练困境。
+
+   - Soft-parameter sharing：既然共享所有参数会出问题，很自然的想法是共享部分参数就行了。对于不同的任务选择不同的参数共享，假设一组参数是一个专家，我们使用多个专家（即多个tower）。然后对不同人物给不同的tower分配权重，这样就可以允许底层使用不同的专家针对不同的任务了。而且这种方式也显得更加灵活。这个范式对应的结果从 MOE->MMOE->PLE
+
+   通过上面的描述，我们知道了hard parameter sharing不能很好的权衡特定任务之间的冲突关系。这也就是MMOE模型提出的动机， 那么下面的关键就是MMOE模型是怎么建模任务之间的关系的，又是怎么能使得任务间的关系保持平衡的？
+
+2. MMOE模型结构
+
+   ![](material/ch4-mmoe.png)
+
+   上图是一个模型逐渐演进的过程，hard-shared-bottom -> MOE -> MMOE
+
+   i) MOE
+
+   首先引入多个专家表达不同的任务，每个专家都需要有各自的权重，这里引入一个门控网络机制来做到这件事情。数学表示如下
+   $$
+   y=\sum_{i=1}^{n}g(x)_if_i(x)  \\
+    \sum_{i=1}^ng(x)_i=1
+   $$
+   其中$g(x)_i$表示权重，$f_i(x)$表示每个专家的输出
+
+
+
+参考资料：
+
+https://datawhalechina.github.io/fun-rec/#/ch02/ch2.2/ch2.2.5/2.2.5.0
+
+https://developer.aliyun.com/article/793252
+
+https://zhuanlan.zhihu.com/p/291406172
